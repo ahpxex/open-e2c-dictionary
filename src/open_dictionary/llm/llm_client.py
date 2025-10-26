@@ -8,11 +8,17 @@ client = OpenAI(
 )
 
 def get_chat_response(instructions: str, input: str) -> str:
+  print(f'Url: {client.base_url}')
+  print(f'model is {get_env('LLM_MODEL')}')
+  print(f'Instruction length: {len(instructions)}')
+  print(f'Input length: {len(input)}')
+  print(input)
   response = client.responses.create(
     model=get_env('LLM_MODEL'), # type: ignore
     instructions=instructions,
     input=input,
-    temperature=0.1
+    temperature=0.1,
+    timeout=500
   )
 
   return response.output_text

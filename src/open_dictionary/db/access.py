@@ -2,6 +2,8 @@ from time import sleep
 from typing import Iterator, Any
 import psycopg
 from psycopg.rows import dict_row
+
+from open_dictionary.llm.define import define
 from open_dictionary.utils.env_loader import get_env
 
 class DatabaseAccess:
@@ -36,8 +38,10 @@ class DatabaseAccess:
                     for row in rows:
                         yield row
 
-db = DatabaseAccess()
-for i in db.iterate_table('dictionary_en'):
-    print(i)
-    sleep(100)
+# db = DatabaseAccess()
+# for i in db.iterate_table('dictionary_en'):
+    
+#     definition = define(i)
+#     print(definition)
+    
     
