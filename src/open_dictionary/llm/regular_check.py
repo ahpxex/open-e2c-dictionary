@@ -17,131 +17,150 @@ class Category(str, Enum):
     LAW = "Law"
     ARTS_CULTURE = "Arts & Culture"
     ARCHAIC_OBSOLETE = "Archaic / Obsolete"
+    SLANG_INFORMAL = "Slang / Informal"
 
 
 class Regularity(BaseModel):
-    word: str
-    is_common: bool
-    reasoning: str
     category: Category
+    tags: list[str]
+    commonness_score: int
 
 instruction = """
-You are an expert linguist and lexicographer. Your task is to evaluate an English word or phrase based on its commonality and its subject category, responding with a single JSON object.
 
-**1. Commonality Check:**
-Determine if the word/phrase is 'common'. A 'common' word meets a very high bar: it is used in the vast majority (e.g., 99.9%) of everyday life, conversations, and the standard K-12 school curriculum. It should be instantly recognizable and understood by nearly all native English speakers, regardless of their profession or education level. If a word is primarily known through specific high school subjects (like AP Biology) but not used outside of that context, it is not 'common'.
+You are an expert lexicographer and data classifier, tasked with categorizing English word definitions for a large-scale dictionary project. Your analysis must be precise, consistent, and adhere strictly to the provided format.
 
-**2. Category Classification:**
-Classify the word/phrase into **one** of the following fixed categories. You **must** select the best fit from this list only.
+**Your Task:**
+1.  Analyze the provided word, its part of speech (POS), and its English definition.
+2.  Based ONLY on the information in the definition, assign it to the most appropriate primary category and any relevant secondary tags.
+3.  Estimate the "commonness" of the word itself in general English usage on a scale of 1 to 10.
 
-*   `General`: For words used broadly across all contexts.
-*   `Biology`: Concepts related to living organisms.
-*   `Chemistry`: Concepts related to substances, their properties, and reactions.
-*   `Physics`: Concepts related to matter, energy, and their interactions.
-*   `Mathematics`: Concepts related to numbers, quantity, and space.
-*   `Technology / Computer Science`: Terms related to applied science, computing, and the internet.
-*   `Medicine`: Terms specific to health, disease, and clinical practice.
-*   `Social Sciences`: Terms from sociology, psychology, anthropology, and political science.
-*   `Humanities`: Terms from philosophy, literature, and history.
-*   `Business & Economics`: Terms related to commerce, finance, and the economy.
-*   `Law`: Terms specific to the legal profession and system.
-*   `Arts & Culture`: Terms related to music, visual arts, and cultural practices.
-*   `Archaic / Obsolete`: Words that are no longer in common use.
+**Rules:**
+1.  **Primary Category:** You MUST choose exactly ONE primary category from the `Category List` that BEST fits the definition.
+2.  **Secondary Tags:** You MAY choose up to THREE secondary tags from the `Category List`. Tags should represent other relevant fields but must not be the same as the primary category. If no other fields are relevant, provide an empty list: `[]`.
+3.  **Commonness Score (`commonness_score`):** You MUST provide an integer score from 1 to 10.
+    *   **10:** Core function words. The absolute building blocks of English (e.g., `the`, `a`, `of`, `is`, `i`, `you`).
+    *   **8-9:** Extremely common content words used in daily conversation by nearly everyone (e.g., `house`, `walk`, `happy`, `water`, `good`).
+    *   **6-7:** Common, everyday words, but slightly more descriptive or specific (e.g., `market`, `decision`, `beautiful`, `sophisticated`).
+    *   **4-5:** Educated vocabulary. Words understood by most educated adults but not used daily (e.g., `ubiquitous`, `elaborate`, `criterion`).
+    *   **2-3:** Specialized or formal vocabulary. Common in academic, legal, or technical fields, but rare in general conversation (e.g., `jurisprudence`, `ionize`, `game theory`).
+    *   **1:** Very rare, archaic, obsolete, or extremely technical jargon (e.g., `weltanschauung`, `afeard`, `syzygy`).
+4.  **Scoring Focus:** The `commonness_score` applies to the **word itself**, not its specific definition. For example, the word "culture" is very common (score 9), even if one of its definitions is a technical one from biology.
+5.  **Output Format:** Your final output MUST be a single, valid JSON object and nothing else. Do not include any explanations, greetings, or surrounding text.
 
-**3. Output Format:**
-Your response **must** be a single, valid JSON object with the following keys:
-*   `"word"`: The input word or phrase being evaluated.
-*   `"is_common"`: A boolean (`true` or `false`).
-*   `"reasoning"`: A brief explanation for the commonality classification, justifying your choice.
-*   `"category"`: The classified subject category, chosen from the fixed list above.
+**Category List:**
+- General
+- Biology
+- Chemistry
+- Physics
+- Mathematics
+- Technology / Computer Science
+- Medicine
+- Social Sciences
+- Humanities
+- Business & Economics
+- Law
+- Arts & Culture
+- Archaic / Obsolete
+- Slang / Informal
+
+--- EXAMPLES ---
 
 ---
-
-**[Example 1]**
-
-**Input:** water
-
-**Output:**
+Input Data:
 {
-  "word": "water",
-  "is_common": true,
-  "reasoning": "'Water' is one of the most fundamental words in the English language, learned in early childhood and used daily by everyone. It is essential for everyday life and basic education.",
-  "category": "General"
+  "word": "semiconductor",
+  "pos": "noun",
+  "definition": "A substance, such as silicon, that has electrical conductivity intermediate between that of a conductor and an insulator, used in the manufacture of electronic devices."
 }
 
-[Example 2]
-
-**Input:** osmosis
-
-**Output:**
-
+Your JSON Output:
 {
-  "word": "osmosis",
-  "is_common": false,
-  "reasoning": "While taught in high school biology, 'osmosis' is a specific scientific term not used in everyday conversation. Its usage is almost exclusively confined to academic or educational contexts.",
-  "category": "Biology"
+  "category": "Technology / Computer Science",
+  "tags": ["Physics", "Chemistry"],
+  "commonness_score": 4
+}
+---
+Input Data:
+{
+  "word": "culture",
+  "pos": "noun",
+  "definition": "The cultivation of bacteria, tissue cells, etc., in an artificial medium containing nutrients."
 }
 
-[Example 3]
-
-**Input: anomie**
-
-**Output:**
-
+Your JSON Output:
 {
-  "word": "anomie",
-  "is_common": false,
-  "reasoning": "This is a specialized term from sociology referring to a lack of usual social or ethical standards in an individual or group. It is not known or used by the general population.",
-  "category": "Social Sciences"
+  "category": "Biology",
+  "tags": ["Medicine"],
+  "commonness_score": 9
+}
+---
+Input Data:
+{
+  "word": "walk",
+  "pos": "verb",
+  "definition": "To move at a regular pace by lifting and setting down each foot in turn, never having both feet off the ground at once."
 }
 
-
-[Example 4]
-
-**Input:** forsooth
-
-**Output:**
-
+Your JSON Output:
 {
-  "word": "forsooth",
-  "is_common": false,
-  "reasoning": "This is an archaic word for 'indeed' or 'in truth'. It is no longer part of modern English and is only encountered in historical texts or for literary effect.",
-  "category": "Archaic / Obsolete"
+  "category": "General",
+  "tags": [],
+  "commonness_score": 9
+}
+---
+Input Data:
+{
+  "word": "game theory",
+  "pos": "noun",
+  "definition": "The mathematical study of strategic decision making, applied in contexts of conflict and cooperation."
 }
 
-[Example 5]
-
-**Input:** algorithm
-
-**Output:**
-
+Your JSON Output:
 {
-  "word": "algorithm",
-  "is_common": false,
-  "reasoning": "Although the concept is increasingly discussed in news and media, the word 'algorithm' is still technical. Many people may have heard it but lack a precise understanding, and it is not used in most daily, non-technical conversations.",
-  "category": "Technology / Computer Science"
+  "category": "Mathematics",
+  "tags": ["Social Sciences", "Business & Economics"],
+  "commonness_score": 3
+}
+---
+Input Data:
+{
+  "word": "afeard",
+  "pos": "adjective",
+  "definition": "(Dialectal or archaic) Afraid, scared, frightened."
 }
 
-[Example 6]
-
-**Input:** thank you
-**Output:**
-
+Your JSON Output:
 {
-  "word": "thank you",
-  "is_common": true,
-  "reasoning": "This is a core polite phrase used universally in daily interactions. It is one of the first phrases taught to children and is a cornerstone of everyday communication.",
-  "category": "General"
+  "category": "Archaic / Obsolete",
+  "tags": [],
+  "commonness_score": 1
 }
+---
+Input Data:
+{
+  "word": "rizz",
+  "pos": "noun",
+  "definition": "(Internet slang) Style, charm, or attractiveness; the ability to attract a romantic or sexual partner."
+}
+
+Your JSON Output:
+{
+  "category": "Slang / Informal",
+  "tags": [],
+  "commonness_score": 3
+}
+---
 
 """
 
-def check_regularity(word: str) -> Regularity:
-    response = get_chat_response(instruction, f'[Your Turn]: input: {word} output: ')
+def check_regularity(word: str, pos: str, definition: str) -> Regularity:
+    import json
+    input_data = json.dumps({"word": word, "pos": pos, "definition": definition})
+    response = get_chat_response(instruction, f'--- TASK ---\n\nInput Data:\n{input_data}\n\nYour JSON Output:')
     return Regularity.model_validate_json(response)
 
 if __name__ == '__main__':
-    result = check_regularity('rizz')
-    print(result.word)
-    print(result.reasoning)
+    result = check_regularity('rizz', 'noun', 'An amount of rolling paper particularly of the Rizla+ brand.')
     print(result.category)
+    print(result.tags)
+    print(result.commonness_score)
