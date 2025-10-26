@@ -495,7 +495,7 @@ def copy_jsonl_to_postgres(
             )
             copy_command = copy_sql.as_string(connection)
 
-            with cursor.copy(copy_command) as copy:
+            with cursor.copy(copy_command) as copy: # type: ignore
                 for json_text, bytes_processed in iter_json_lines(jsonl_path):
                     copy.write_row((json_text,))
                     rows_written += 1
@@ -553,7 +553,7 @@ def _cmd_download(args: argparse.Namespace) -> int:
     except OSError as exc:
         args._parser.error(str(exc))
 
-    print(f"Downloaded file to {destination}")
+    print(f"Downloaded file to {destination}")  # type: ignore
     return 0
 
 
@@ -569,7 +569,7 @@ def _cmd_extract(args: argparse.Namespace) -> int:
     except OSError as exc:
         args._parser.error(str(exc))
 
-    print(f"Extracted archive to {output}")
+    print(f"Extracted archive to {output}")  # type: ignore
     return 0
 
 
@@ -582,7 +582,7 @@ def _cmd_load(args: argparse.Namespace) -> int:
     try:
         rows_copied = copy_jsonl_to_postgres(
             jsonl_path=args.input,
-            conninfo=conninfo,
+            conninfo=conninfo,  # type: ignore
             table_name=args.table,
             column_name=args.column,
             truncate=args.truncate,
@@ -592,7 +592,7 @@ def _cmd_load(args: argparse.Namespace) -> int:
     except (psycopg.Error, ValueError) as exc:
         args._parser.error(f"Database error: {exc}")
 
-    print(f"Copied {rows_copied} rows into {args.table}.{args.column}")
+    print(f"Copied {rows_copied} rows into {args.table}.{args.column}")  # type: ignore
     return 0
 
 
@@ -604,7 +604,7 @@ def _cmd_partition(args: argparse.Namespace) -> int:
 
     try:
         created = partition_dictionary_by_language(
-            conninfo,
+            conninfo,  # type: ignore
             source_table=args.table,
             column_name=args.column,
             lang_field=args.lang_field,
@@ -615,7 +615,7 @@ def _cmd_partition(args: argparse.Namespace) -> int:
     except (psycopg.Error, ValueError) as exc:
         args._parser.error(f"Database error: {exc}")
 
-    if created:
+    if created:  # type: ignore
         print("Created/updated tables:")
         for table in created:
             print(f"- {table}")
@@ -633,7 +633,7 @@ def _cmd_pipeline(args: argparse.Namespace) -> int:
     try:
         run_pipeline(
             workdir=args.workdir,
-            conninfo=conninfo,
+            conninfo=conninfo,  # type: ignore
             table_name=args.table,
             column_name=args.column,
             url=args.url,

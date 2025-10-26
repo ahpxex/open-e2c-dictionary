@@ -139,8 +139,9 @@ Your response **must** be a single, valid JSON object with the following keys:
 def check_regularity(word: str) -> Regularity:
     response = get_chat_response(instruction, f'[Your Turn]: input: {word} output: ')
     return Regularity.model_validate_json(response)
-  
-result = check_regularity('academic')
-print(result.word)
-print(result.reasoning)
-print(result.category)
+
+if __name__ == '__main__':
+    result = check_regularity('rizz')
+    print(result.word)
+    print(result.reasoning)
+    print(result.category)
