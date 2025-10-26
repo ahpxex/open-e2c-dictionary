@@ -1,2 +1,5 @@
-def main() -> None:
-    print("Hello from open-english-dictionary!")
+from .importer import main as _cli_main
+
+
+def importer() -> None:
+    raise SystemExit(_cli_main())
