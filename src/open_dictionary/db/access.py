@@ -38,10 +38,4 @@ class DatabaseAccess:
                     for row in rows:
                         yield row
 
-# db = DatabaseAccess()
-# for i in db.iterate_table('dictionary_en'):
-    
-#     definition = define(i)
-#     print(definition)
-    
     
