@@ -147,7 +147,6 @@ instruction = """
 
 """
 
-
 class Example(BaseModel):
     en: str
     cn: str
