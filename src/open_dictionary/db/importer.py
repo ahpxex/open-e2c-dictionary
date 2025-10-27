@@ -717,7 +717,7 @@ def _build_parser() -> argparse.ArgumentParser:
     load_parser.add_argument("input", type=Path, help="Path to the JSONL file to load.")
     load_parser.add_argument(
         "--table",
-        default="dictionary",
+        default="dictionary_en",
         help="Target table name (default: dictionary).",
     )
     load_parser.add_argument(

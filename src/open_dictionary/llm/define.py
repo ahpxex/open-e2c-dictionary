@@ -191,5 +191,5 @@ def define(input_json: dict) -> Definition:
     """
     input_data = json.dumps(input_json, ensure_ascii=False)
     response = get_chat_response(instruction, input_data)
-    print(response)
+
     return Definition.model_validate_json(response)
