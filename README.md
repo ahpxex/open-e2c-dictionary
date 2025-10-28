@@ -52,4 +52,19 @@ uv run open-dictionary partition \
   --lang-field lang_code
 ```
 
+Materialize a smaller set of languages into dedicated tables with a custom prefix:
+
+```bash
+uv run open-dictionary filter en zh \
+  --table dictionary_all \
+  --column data \
+  --table-prefix dictionary_filtered
+```
+
+Pass `all` to emit every language into its own table:
+
+```bash
+uv run open-dictionary filter all --table dictionary_all --column data
+```
+
 Each command streams data in chunks to handle the 10M+ line dataset efficiently.

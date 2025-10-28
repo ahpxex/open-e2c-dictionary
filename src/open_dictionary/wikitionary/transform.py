@@ -10,7 +10,7 @@ import sys
 import time
 import urllib.parse
 from pathlib import Path
-from typing import Iterator
+from typing import Iterator, Sequence
 
 import psycopg
 from dotenv import load_dotenv
@@ -165,6 +165,7 @@ def partition_dictionary_by_language(
     table_prefix: str = "dictionary_lang",
     target_schema: str | None = None,
     drop_existing: bool = False,
+    languages: Sequence[str] | None = None,
 ) -> list[str]:
     """Split rows in ``source_table`` into per-language tables based on ``lang_field``."""
 
@@ -172,21 +173,24 @@ def partition_dictionary_by_language(
     table_identifier = _identifier_from_dotted(source_table)
     column_identifier = sql.Identifier(column_name)
 
-    select_distinct = sql.SQL(
-        """
-        SELECT DISTINCT {column}->>%s AS lang_code
-        FROM {table}
-        WHERE {column} ? %s
-          AND {column}->>%s IS NOT NULL
-          AND {column}->>%s <> ''
-        ORDER BY lang_code
-        """
-    ).format(column=column_identifier, table=table_identifier)
-
     with psycopg.connect(conninfo) as connection:
         with connection.cursor() as cursor:
-            cursor.execute(select_distinct, (lang_field, lang_field, lang_field, lang_field))
-            language_codes = [row[0] for row in cursor.fetchall() if row and row[0]]
+            if languages:
+                language_codes = [code for code in dict.fromkeys(languages) if code]
+            else:
+                select_distinct = sql.SQL(
+                    """
+                    SELECT DISTINCT {column}->>%s AS lang_code
+                    FROM {table}
+                    WHERE {column} ? %s
+                      AND {column}->>%s IS NOT NULL
+                      AND {column}->>%s <> ''
+                    ORDER BY lang_code
+                    """
+                ).format(column=column_identifier, table=table_identifier)
+
+                cursor.execute(select_distinct, (lang_field, lang_field, lang_field, lang_field))
+                language_codes = [row[0] for row in cursor.fetchall() if row and row[0]]
 
             if not language_codes:
                 print(
@@ -195,22 +199,42 @@ def partition_dictionary_by_language(
                 )
                 return created_tables
 
-            for code in language_codes:
+            total_languages = len(language_codes)
+            print(
+                f"Partitioning {total_languages} language set(s) from {source_table}.{column_name}...",
+                file=sys.stderr,
+            )
+
+            seen_tables: set[tuple[str | None, str]] = set()
+            for idx, code in enumerate(language_codes, start=1):
+                prefix = f"[{idx}/{total_languages}] "
                 safe_code = _sanitize_language_code(code)
                 if not safe_code:
                     print(
-                        f"Skipping language code '{code}' because it cannot form a valid table name.",
+                        prefix
+                        + f"Skipping language code '{code}' because it cannot form a valid table name.",
                         file=sys.stderr,
                     )
                     continue
 
                 table_name = f"{table_prefix}_{safe_code}"
                 if target_schema:
+                    table_key = (target_schema, table_name)
                     target_identifier = sql.Identifier(target_schema, table_name)
                     display_name = f"{target_schema}.{table_name}"
                 else:
+                    table_key = (None, table_name)
                     target_identifier = sql.Identifier(table_name)
                     display_name = table_name
+
+                if table_key in seen_tables:
+                    print(
+                        prefix
+                        + f"Skipping language code '{code}' because it maps to an existing table name {display_name}.",
+                        file=sys.stderr,
+                    )
+                    continue
+                seen_tables.add(table_key)
 
                 if drop_existing:
                     drop_sql = sql.SQL("DROP TABLE IF EXISTS {}").format(target_identifier)
@@ -246,7 +270,10 @@ def partition_dictionary_by_language(
 
                 inserted = cursor.rowcount if cursor.rowcount != -1 else None
                 inserted_text = f" ({inserted} rows)" if inserted is not None else ""
-                print(f"Partitioned '{code}' -> {display_name}{inserted_text}", file=sys.stderr)
+                print(
+                    f"{prefix}Partitioned '{code}' -> {display_name}{inserted_text}",
+                    file=sys.stderr,
+                )
                 created_tables.append(display_name)
 
     return created_tables
@@ -329,6 +356,10 @@ def run_pipeline(
     jsonl_path = gz_path.with_suffix("")
 
     if not skip_download:
+        print(
+            f"Downloading Wiktionary dump from {url} to {gz_path}...",
+            file=sys.stderr,
+        )
         download_wiktionary_dump(
             gz_path,
             url=url,
@@ -341,6 +372,10 @@ def run_pipeline(
         raise FileNotFoundError(f"Expected archive {gz_path} after download step")
 
     if not skip_extract:
+        print(
+            f"Extracting {gz_path} to {jsonl_path}...",
+            file=sys.stderr,
+        )
         extract_wiktionary_dump(
             gz_path,
             jsonl_path,
@@ -379,7 +414,7 @@ def run_pipeline(
     )
 
 
-COMMAND_NAMES = {"download", "extract", "load", "partition", "pipeline"}
+COMMAND_NAMES = {"download", "extract", "filter", "load", "partition", "pipeline"}
 
 
 def _add_database_options(parser: argparse.ArgumentParser) -> None:
@@ -717,6 +752,10 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     _add_database_options(pipeline_parser)
     pipeline_parser.set_defaults(func=_cmd_pipeline, _parser=pipeline_parser)
+
+    from .filter import register_filter_parser
+
+    register_filter_parser(subparsers)
 
     return parser
 
