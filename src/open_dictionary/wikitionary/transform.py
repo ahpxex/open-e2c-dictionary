@@ -1,18 +1,14 @@
-"""Utilities for loading JSONL data into PostgreSQL."""
+"""Utilities for streaming Wiktionary JSONL data into PostgreSQL."""
 
 from __future__ import annotations
 
 import argparse
-import contextlib
-import gzip
 import json
 import os
 import re
 import sys
 import time
-import urllib.error
 import urllib.parse
-import urllib.request
 from pathlib import Path
 from typing import Iterator
 
@@ -20,62 +16,11 @@ import psycopg
 from dotenv import load_dotenv
 from psycopg import sql
 
+from .downloader import DEFAULT_WIKTIONARY_URL, download_wiktionary_dump
+from .extract import extract_wiktionary_dump
+
 
 UTF8_BOM = b"\xef\xbb\xbf"
-DEFAULT_WIKTIONARY_URL = "https://kaikki.org/dictionary/raw-wiktextract-data.jsonl.gz"
-
-
-class ByteProgressPrinter:
-    """Print coarse-grained progress updates for byte-oriented operations."""
-
-    def __init__(
-        self,
-        label: str,
-        total_bytes: int,
-        *,
-        min_bytes_step: int = 64 * 1024 * 1024,
-        min_time_step: float = 5.0,
-    ) -> None:
-        self.label = label
-        self.total_bytes = max(total_bytes, 0)
-        self.min_bytes_step = max(min_bytes_step, 1)
-        self.min_time_step = max(min_time_step, 0.0)
-        self._last_report_time = time.monotonic()
-        self._last_report_bytes = 0
-
-    def report(self, processed_bytes: int, *, force: bool = False) -> None:
-        if processed_bytes < 0:  # pragma: no cover - defensive
-            return
-
-        now = time.monotonic()
-        bytes_increment = processed_bytes - self._last_report_bytes
-
-        if not force and processed_bytes < self.total_bytes:
-            if (
-                bytes_increment < self.min_bytes_step
-                and (now - self._last_report_time) < self.min_time_step
-            ):
-                return
-        elif not force and bytes_increment <= 0:
-            return
-
-        percent_text = ""
-        if self.total_bytes:
-            percent = min(100.0, (processed_bytes / self.total_bytes) * 100)
-            percent_text = f"{percent:5.1f}% | "
-
-        gib_processed = processed_bytes / (1024**3)
-        message = f"{self.label}: {percent_text}{gib_processed:.2f} GiB"
-        print(message, file=sys.stderr, flush=True)
-
-        self._last_report_time = now
-        self._last_report_bytes = processed_bytes
-
-    def finalize(self, processed_bytes: int) -> None:
-        if processed_bytes == 0:
-            return
-
-        self.report(processed_bytes, force=True)
 
 
 class JsonlProcessingError(Exception):
@@ -104,9 +49,7 @@ def iter_json_lines(file_path: Path) -> Iterator[tuple[str, int]]:
             try:
                 json_text = json_bytes.decode("utf-8")
             except UnicodeDecodeError as exc:  # pragma: no cover - defensive
-                message = (
-                    f"Invalid UTF-8 sequence on line {line_number}: {exc!s}"
-                )
+                message = f"Invalid UTF-8 sequence on line {line_number}: {exc!s}"
                 raise JsonlProcessingError(message) from exc
 
             try:
@@ -166,9 +109,7 @@ class ProgressReporter:
             percent_text = f"{percent:5.1f}% | "
 
         gib_processed = bytes_processed / (1024**3)
-        message = (
-            f"Progress: {percent_text}{rows:,} rows | {gib_processed:.2f} GiB read"
-        )
+        message = f"Progress: {percent_text}{rows:,} rows | {gib_processed:.2f} GiB read"
         print(message, file=sys.stderr, flush=True)
 
         self._last_report_time = now
@@ -180,83 +121,6 @@ class ProgressReporter:
             return
 
         self.maybe_report(rows, bytes_processed, force=True)
-
-
-def download_file(
-    url: str,
-    destination: Path,
-    *,
-    overwrite: bool = False,
-    chunk_size: int = 32 * 1024 * 1024,
-) -> Path:
-    """Download ``url`` to ``destination`` with streaming progress feedback."""
-
-    dest_path = Path(destination)
-    if dest_path.exists() and dest_path.is_dir():
-        raise IsADirectoryError(f"Destination {dest_path} is a directory")
-
-    if dest_path.exists() and not overwrite:
-        print(f"Download skipped; {dest_path} already exists.", file=sys.stderr)
-        return dest_path
-
-    dest_path.parent.mkdir(parents=True, exist_ok=True)
-
-    with contextlib.ExitStack() as stack:
-        response = stack.enter_context(urllib.request.urlopen(url))
-        total_size = int(response.headers.get("Content-Length", "0") or 0)
-        progress = ByteProgressPrinter("Downloading", total_size)
-
-        with dest_path.open("wb") as out_handle:
-            downloaded = 0
-            while True:
-                chunk = response.read(chunk_size)
-                if not chunk:
-                    break
-                out_handle.write(chunk)
-                downloaded += len(chunk)
-                progress.report(downloaded)
-
-    progress.finalize(downloaded)
-    return dest_path
-
-
-def extract_gzip(
-    source: Path,
-    destination: Path,
-    *,
-    overwrite: bool = False,
-    chunk_size: int = 32 * 1024 * 1024,
-) -> Path:
-    """Extract a .gz archive to ``destination`` with streaming progress."""
-
-    source_path = Path(source)
-    if not source_path.is_file():
-        raise FileNotFoundError(f"Source archive {source_path} does not exist")
-
-    dest_path = Path(destination)
-    if dest_path.exists() and dest_path.is_dir():
-        raise IsADirectoryError(f"Destination {dest_path} is a directory")
-
-    if dest_path.exists() and not overwrite:
-        print(f"Extraction skipped; {dest_path} already exists.", file=sys.stderr)
-        return dest_path
-
-    dest_path.parent.mkdir(parents=True, exist_ok=True)
-
-    total_size = source_path.stat().st_size
-    progress = ByteProgressPrinter("Extracting", total_size)
-
-    with source_path.open("rb") as raw_handle, gzip.GzipFile(fileobj=raw_handle) as gz_handle:
-        with dest_path.open("wb") as out_handle:
-            while True:
-                chunk = gz_handle.read(chunk_size)
-                if not chunk:
-                    break
-                out_handle.write(chunk)
-                progress.report(raw_handle.tell())
-
-    progress.finalize(total_size)
-    return dest_path
 
 
 def _identifier_from_dotted(qualified_name: str) -> sql.Identifier:
@@ -388,77 +252,6 @@ def partition_dictionary_by_language(
     return created_tables
 
 
-def run_pipeline(
-    *,
-    workdir: Path,
-    conninfo: str,
-    table_name: str,
-    column_name: str,
-    url: str = DEFAULT_WIKTIONARY_URL,
-    truncate: bool = False,
-    skip_download: bool = False,
-    skip_extract: bool = False,
-    skip_partition: bool = False,
-    overwrite_download: bool = False,
-    overwrite_extract: bool = False,
-    lang_field: str = "lang_code",
-    table_prefix: str = "dictionary_lang",
-    target_schema: str | None = None,
-    drop_existing_partitions: bool = False,
-) -> None:
-    """Execute the full download → extract → load → partition workflow."""
-
-    workdir = Path(workdir)
-    workdir.mkdir(parents=True, exist_ok=True)
-
-    parsed = urllib.parse.urlparse(url)
-    filename = Path(parsed.path or "wiktextract.jsonl.gz").name
-    gz_path = workdir / filename
-    jsonl_path = gz_path.with_suffix("")
-
-    if not skip_download:
-        download_file(url, gz_path, overwrite=overwrite_download)
-    else:
-        print(f"Skipping download step; reusing {gz_path}", file=sys.stderr)
-
-    if not gz_path.exists():
-        raise FileNotFoundError(f"Expected archive {gz_path} after download step")
-
-    if not skip_extract:
-        extract_gzip(gz_path, jsonl_path, overwrite=overwrite_extract)
-    else:
-        print(f"Skipping extract step; reusing {jsonl_path}", file=sys.stderr)
-
-    if not jsonl_path.exists():
-        raise FileNotFoundError(f"Expected JSONL file {jsonl_path} after extract step")
-
-    rows_copied = copy_jsonl_to_postgres(
-        jsonl_path=jsonl_path,
-        conninfo=conninfo,
-        table_name=table_name,
-        column_name=column_name,
-        truncate=truncate,
-    )
-    print(
-        f"Finished loading {rows_copied:,} rows into {table_name}.{column_name}",
-        file=sys.stderr,
-    )
-
-    if skip_partition:
-        print("Partition step skipped by configuration.", file=sys.stderr)
-        return
-
-    partition_dictionary_by_language(
-        conninfo,
-        source_table=table_name,
-        column_name=column_name,
-        lang_field=lang_field,
-        table_prefix=table_prefix,
-        target_schema=target_schema,
-        drop_existing=drop_existing_partitions,
-    )
-
-
 def copy_jsonl_to_postgres(
     jsonl_path: Path,
     conninfo: str,
@@ -495,7 +288,7 @@ def copy_jsonl_to_postgres(
             )
             copy_command = copy_sql.as_string(connection)
 
-            with cursor.copy(copy_command) as copy: # type: ignore
+            with cursor.copy(copy_command) as copy:  # type: ignore[arg-type]
                 for json_text, bytes_processed in iter_json_lines(jsonl_path):
                     copy.write_row((json_text,))
                     rows_written += 1
@@ -505,6 +298,85 @@ def copy_jsonl_to_postgres(
     progress.finalize(rows_written, latest_bytes_processed)
 
     return rows_written
+
+
+def run_pipeline(
+    *,
+    workdir: Path,
+    conninfo: str,
+    table_name: str,
+    column_name: str,
+    url: str = DEFAULT_WIKTIONARY_URL,
+    truncate: bool = False,
+    skip_download: bool = False,
+    skip_extract: bool = False,
+    skip_partition: bool = False,
+    overwrite_download: bool = False,
+    overwrite_extract: bool = False,
+    lang_field: str = "lang_code",
+    table_prefix: str = "dictionary_lang",
+    target_schema: str | None = None,
+    drop_existing_partitions: bool = False,
+) -> None:
+    """Execute the full download → extract → load → partition workflow."""
+
+    workdir = Path(workdir)
+    workdir.mkdir(parents=True, exist_ok=True)
+
+    parsed = urllib.parse.urlparse(url)
+    filename = Path(parsed.path or "wiktextract.jsonl.gz").name
+    gz_path = workdir / filename
+    jsonl_path = gz_path.with_suffix("")
+
+    if not skip_download:
+        download_wiktionary_dump(
+            gz_path,
+            url=url,
+            overwrite=overwrite_download,
+        )
+    else:
+        print(f"Skipping download step; reusing {gz_path}", file=sys.stderr)
+
+    if not gz_path.exists():
+        raise FileNotFoundError(f"Expected archive {gz_path} after download step")
+
+    if not skip_extract:
+        extract_wiktionary_dump(
+            gz_path,
+            jsonl_path,
+            overwrite=overwrite_extract,
+        )
+    else:
+        print(f"Skipping extract step; reusing {jsonl_path}", file=sys.stderr)
+
+    if not jsonl_path.exists():
+        raise FileNotFoundError(f"Expected JSONL file {jsonl_path} after extract step")
+
+    rows_copied = copy_jsonl_to_postgres(
+        jsonl_path=jsonl_path,
+        conninfo=conninfo,
+        table_name=table_name,
+        column_name=column_name,
+        truncate=truncate,
+    )
+    print(
+        f"Finished loading {rows_copied:,} rows into {table_name}.{column_name}",
+        file=sys.stderr,
+    )
+
+    if skip_partition:
+        print("Partition step skipped by configuration.", file=sys.stderr)
+        return
+
+    partition_dictionary_by_language(
+        conninfo,
+        source_table=table_name,
+        column_name=column_name,
+        lang_field=lang_field,
+        table_prefix=table_prefix,
+        target_schema=target_schema,
+        drop_existing=drop_existing_partitions,
+    )
 
 
 COMMAND_NAMES = {"download", "extract", "load", "partition", "pipeline"}
@@ -543,23 +415,23 @@ def _get_conninfo(args: argparse.Namespace) -> str:
 
 def _cmd_download(args: argparse.Namespace) -> int:
     try:
-        destination = download_file(
-            args.url,
+        destination = download_wiktionary_dump(
             args.output,
+            url=args.url,
             overwrite=args.overwrite,
         )
-    except urllib.error.URLError as exc:  # pragma: no cover - network failure
-        args._parser.error(f"Download failed: {exc.reason or exc}")
+    except RuntimeError as exc:  # pragma: no cover - network failure guard
+        args._parser.error(str(exc))
     except OSError as exc:
         args._parser.error(str(exc))
 
-    print(f"Downloaded file to {destination}")  # type: ignore
+    print(f"Downloaded file to {destination}")  # type: ignore[func-returns-value]
     return 0
 
 
 def _cmd_extract(args: argparse.Namespace) -> int:
     try:
-        output = extract_gzip(
+        output = extract_wiktionary_dump(
             args.input,
             args.output,
             overwrite=args.overwrite,
@@ -569,7 +441,7 @@ def _cmd_extract(args: argparse.Namespace) -> int:
     except OSError as exc:
         args._parser.error(str(exc))
 
-    print(f"Extracted archive to {output}")  # type: ignore
+    print(f"Extracted archive to {output}")  # type: ignore[func-returns-value]
     return 0
 
 
@@ -582,7 +454,7 @@ def _cmd_load(args: argparse.Namespace) -> int:
     try:
         rows_copied = copy_jsonl_to_postgres(
             jsonl_path=args.input,
-            conninfo=conninfo,  # type: ignore
+            conninfo=conninfo,  # type: ignore[arg-type]
             table_name=args.table,
             column_name=args.column,
             truncate=args.truncate,
@@ -592,7 +464,7 @@ def _cmd_load(args: argparse.Namespace) -> int:
     except (psycopg.Error, ValueError) as exc:
         args._parser.error(f"Database error: {exc}")
 
-    print(f"Copied {rows_copied} rows into {args.table}.{args.column}")  # type: ignore
+    print(f"Copied {rows_copied} rows into {args.table}.{args.column}")  # type: ignore[misc]
     return 0
 
 
@@ -604,7 +476,7 @@ def _cmd_partition(args: argparse.Namespace) -> int:
 
     try:
         created = partition_dictionary_by_language(
-            conninfo,  # type: ignore
+            conninfo,  # type: ignore[arg-type]
             source_table=args.table,
             column_name=args.column,
             lang_field=args.lang_field,
@@ -615,7 +487,7 @@ def _cmd_partition(args: argparse.Namespace) -> int:
     except (psycopg.Error, ValueError) as exc:
         args._parser.error(f"Database error: {exc}")
 
-    if created:  # type: ignore
+    if created:  # type: ignore[truthy-bool]
         print("Created/updated tables:")
         for table in created:
             print(f"- {table}")
@@ -633,7 +505,7 @@ def _cmd_pipeline(args: argparse.Namespace) -> int:
     try:
         run_pipeline(
             workdir=args.workdir,
-            conninfo=conninfo,  # type: ignore
+            conninfo=conninfo,  # type: ignore[arg-type]
             table_name=args.table,
             column_name=args.column,
             url=args.url,
@@ -650,8 +522,8 @@ def _cmd_pipeline(args: argparse.Namespace) -> int:
         )
     except (FileNotFoundError, JsonlProcessingError) as exc:
         args._parser.error(str(exc))
-    except urllib.error.URLError as exc:  # pragma: no cover - network failure
-        args._parser.error(f"Download failed: {exc.reason or exc}")
+    except RuntimeError as exc:  # pragma: no cover - network failure guard
+        args._parser.error(str(exc))
     except (psycopg.Error, ValueError) as exc:
         args._parser.error(f"Database error: {exc}")
 
@@ -717,8 +589,8 @@ def _build_parser() -> argparse.ArgumentParser:
     load_parser.add_argument("input", type=Path, help="Path to the JSONL file to load.")
     load_parser.add_argument(
         "--table",
-        default="dictionary_en",
-        help="Target table name (default: dictionary).",
+        default="dictionary_all",
+        help="Target table name (default: dictionary_all).",
     )
     load_parser.add_argument(
         "--column",
@@ -739,8 +611,8 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     partition_parser.add_argument(
         "--table",
-        default="dictionary",
-        help="Source table containing the JSONB data (default: dictionary).",
+        default="dictionary_all",
+        help="Source table containing the JSONB data (default: dictionary_all).",
     )
     partition_parser.add_argument(
         "--column",
@@ -786,8 +658,8 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     pipeline_parser.add_argument(
         "--table",
-        default="dictionary",
-        help="Destination table for the raw entries (default: dictionary).",
+        default="dictionary_all",
+        help="Destination table for the raw entries (default: dictionary_all).",
     )
     pipeline_parser.add_argument(
         "--column",
@@ -870,5 +742,16 @@ def main(argv: list[str] | None = None) -> int:
     return func(args)
 
 
-if __name__ == "__main__":
+if __name__ == "__main__":  # pragma: no cover - CLI entry guard
     sys.exit(main())
+
+
+__all__ = [
+    "JsonlProcessingError",
+    "iter_json_lines",
+    "ProgressReporter",
+    "partition_dictionary_by_language",
+    "copy_jsonl_to_postgres",
+    "run_pipeline",
+    "main",
+]
