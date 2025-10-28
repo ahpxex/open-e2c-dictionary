@@ -16,6 +16,8 @@ This is a full tool sets for building a open dictionary, based on wikitionary da
 - `uv run open-dictionary download --output data/raw-wiktextract-data.jsonl.gz` streams the upstream Wiktextract snapshot.
 - `uv run open-dictionary pipeline --workdir data --table dictionary --column data --truncate` executes download → extract → load → partition in one shot; add `--skip-*` flags for partial runs.
 - `uv run open-dictionary filter en zh --table dictionary_all --column data` copies only selected languages into `dictionary_lang_*` tables; pass `all` as the first positional argument to materialize every language code.
+- `uv run open-dictionary db-clean --table dictionary_en` removes rows that fail quality heuristics (numeric tokens, zero scores, legacy tags, etc.).
+- `uv run open-dictionary db-commonness --table dictionary_en` streams wordfreq-derived `common_score` values into the target table (add `--recompute-existing` to refresh populated rows).
 - `uv run python -m pytest` is the expected test runner once suites are added; for now, rely on targeted CLI runs against a disposable PostgreSQL database.
 
 ## Coding Style & Naming Conventions

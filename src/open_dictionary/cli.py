@@ -10,6 +10,8 @@ from pathlib import Path
 import psycopg
 from dotenv import load_dotenv
 
+from .db import cleaner as db_cleaner
+from .db import mark_commonness as db_commonness
 from .wikitionary.downloader import DEFAULT_WIKTIONARY_URL, download_wiktionary_dump
 from .wikitionary.extract import extract_wiktionary_dump
 from .wikitionary.filter import filter_languages
@@ -21,7 +23,19 @@ from .wikitionary.transform import (
 )
 
 
-COMMAND_NAMES = {"download", "extract", "filter", "load", "partition", "pipeline"}
+DEFAULT_DICTIONARY_TABLE = "dictionary_en"
+
+
+COMMAND_NAMES = {
+    "download",
+    "extract",
+    "filter",
+    "load",
+    "partition",
+    "pipeline",
+    "db-clean",
+    "db-commonness",
+}
 
 
 def _add_database_options(parser: argparse.ArgumentParser) -> None:
@@ -201,6 +215,39 @@ def _cmd_filter(args: argparse.Namespace) -> int:
             print(f"- {table}")
     else:
         print("No tables were created.")
+    return 0
+
+
+def _cmd_db_clean(args: argparse.Namespace) -> int:
+    try:
+        _ = _get_conninfo(args)
+    except RuntimeError as exc:
+        args._parser.error(str(exc))
+
+    db_cleaner.clean_dictionary_data(
+        table_name=args.table,
+        fetch_batch_size=args.fetch_batch_size,
+        delete_batch_size=args.delete_batch_size,
+        progress_every_rows=args.progress_every_rows,
+        progress_every_seconds=args.progress_every_seconds,
+    )
+    return 0
+
+
+def _cmd_db_commonness(args: argparse.Namespace) -> int:
+    try:
+        _ = _get_conninfo(args)
+    except RuntimeError as exc:
+        args._parser.error(str(exc))
+
+    db_commonness.enrich_common_score(
+        table_name=args.table,
+        fetch_batch_size=args.fetch_batch_size,
+        update_batch_size=args.update_batch_size,
+        progress_every_rows=args.progress_every_rows,
+        progress_every_seconds=args.progress_every_seconds,
+        recompute_existing=args.recompute_existing,
+    )
     return 0
 
 
@@ -431,6 +478,83 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     _add_database_options(filter_parser)
     filter_parser.set_defaults(func=_cmd_filter, _parser=filter_parser)
+
+    db_clean_parser = subparsers.add_parser(
+        "db-clean",
+        help="Remove low-quality entries from a dictionary table.",
+    )
+    db_clean_parser.add_argument(
+        "--table",
+        default=DEFAULT_DICTIONARY_TABLE,
+        help="Source table containing JSONB entries (default: %(default)s).",
+    )
+    db_clean_parser.add_argument(
+        "--fetch-batch-size",
+        type=int,
+        default=db_cleaner.FETCH_BATCH_SIZE,
+        help="Number of rows to fetch per batch (default: %(default)s).",
+    )
+    db_clean_parser.add_argument(
+        "--delete-batch-size",
+        type=int,
+        default=db_cleaner.DELETE_BATCH_SIZE,
+        help="Number of rows to delete per batch (default: %(default)s).",
+    )
+    db_clean_parser.add_argument(
+        "--progress-every-rows",
+        type=int,
+        default=db_cleaner.PROGRESS_EVERY_ROWS,
+        help="Emit progress after this many processed rows (default: %(default)s).",
+    )
+    db_clean_parser.add_argument(
+        "--progress-every-seconds",
+        type=float,
+        default=db_cleaner.PROGRESS_EVERY_SECONDS,
+        help="Emit progress at least this often in seconds (default: %(default)s).",
+    )
+    _add_database_options(db_clean_parser)
+    db_clean_parser.set_defaults(func=_cmd_db_clean, _parser=db_clean_parser)
+
+    db_common_parser = subparsers.add_parser(
+        "db-commonness",
+        help="Populate the common_score column using word frequency data.",
+    )
+    db_common_parser.add_argument(
+        "--table",
+        default=DEFAULT_DICTIONARY_TABLE,
+        help="Target dictionary table (default: %(default)s).",
+    )
+    db_common_parser.add_argument(
+        "--fetch-batch-size",
+        type=int,
+        default=db_commonness.FETCH_BATCH_SIZE,
+        help="Number of rows to fetch per batch (default: %(default)s).",
+    )
+    db_common_parser.add_argument(
+        "--update-batch-size",
+        type=int,
+        default=db_commonness.UPDATE_BATCH_SIZE,
+        help="Number of rows to update per batch (default: %(default)s).",
+    )
+    db_common_parser.add_argument(
+        "--progress-every-rows",
+        type=int,
+        default=db_commonness.PROGRESS_EVERY_ROWS,
+        help="Emit progress after this many processed rows (default: %(default)s).",
+    )
+    db_common_parser.add_argument(
+        "--progress-every-seconds",
+        type=float,
+        default=db_commonness.PROGRESS_EVERY_SECONDS,
+        help="Emit progress at least this often in seconds (default: %(default)s).",
+    )
+    db_common_parser.add_argument(
+        "--recompute-existing",
+        action="store_true",
+        help="Recalculate scores even if a value already exists.",
+    )
+    _add_database_options(db_common_parser)
+    db_common_parser.set_defaults(func=_cmd_db_commonness, _parser=db_common_parser)
 
     return parser
 

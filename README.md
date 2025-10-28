@@ -67,4 +67,16 @@ Pass `all` to emit every language into its own table:
 uv run open-dictionary filter all --table dictionary_all --column data
 ```
 
+Remove low-quality rows (zero common score, numeric tokens, legacy tags) directly in PostgreSQL:
+
+```bash
+uv run open-dictionary db-clean --table dictionary_filtered_en
+```
+
+Populate the `common_score` column with word frequency data (re-run with `--recompute-existing` to refresh scores):
+
+```bash
+uv run open-dictionary db-commonness --table dictionary_filtered_en
+```
+
 Each command streams data in chunks to handle the 10M+ line dataset efficiently.

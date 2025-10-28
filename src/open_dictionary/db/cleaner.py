@@ -10,7 +10,6 @@ from psycopg.cursor import Cursor
 # 注意：您需要确保 open_dictionary.db.access 模块在您的环境中可用
 from open_dictionary.db.access import DatabaseAccess
 
-DEFAULT_TABLE = "dictionary_en"
 FETCH_BATCH_SIZE = 5000
 DELETE_BATCH_SIZE = 5000
 PROGRESS_EVERY_ROWS = 20_000
@@ -18,7 +17,7 @@ PROGRESS_EVERY_SECONDS = 30.0
 
 
 def clean_dictionary_data(
-    table_name: str = DEFAULT_TABLE,
+    table_name: str,
     *,
     fetch_batch_size: int = FETCH_BATCH_SIZE,
     delete_batch_size: int = DELETE_BATCH_SIZE,
@@ -175,7 +174,10 @@ def _report_completion(processed: int, deleted: int, start_time: float) -> None:
         f"delete_rate={deleted_rate:,.0f} rows/s",
         flush=True,
     )
-
-
-if __name__ == "__main__":
-    clean_dictionary_data()
+__all__ = [
+    "FETCH_BATCH_SIZE",
+    "DELETE_BATCH_SIZE",
+    "PROGRESS_EVERY_ROWS",
+    "PROGRESS_EVERY_SECONDS",
+    "clean_dictionary_data",
+]

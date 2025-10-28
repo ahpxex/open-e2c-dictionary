@@ -12,8 +12,11 @@ ColumnSpec = Union[str, Tuple[str, Composable]]
 class DatabaseAccess:
     """Database access layer for dictionary tables."""
 
-    def __init__(self):
-        self.connection_string = get_env('DATABASE_URL')
+    def __init__(self, connection_string: str | None = None):
+        resolved = connection_string or get_env("DATABASE_URL")
+        if not resolved:
+            raise RuntimeError("Database connection string is not configured")
+        self.connection_string = resolved
 
     def _get_connection(self):
         """Get database connection."""

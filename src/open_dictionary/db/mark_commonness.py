@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 import json
+import time
 from decimal import Decimal
 from functools import lru_cache
 from typing import Any, Optional, Sequence, Tuple
-import time
 
 from psycopg import sql
 from psycopg.cursor import Cursor
@@ -12,7 +12,6 @@ from wordfreq import zipf_frequency
 
 from open_dictionary.db.access import DatabaseAccess
 
-DEFAULT_TABLE = "dictionary_en"
 FETCH_BATCH_SIZE = 5000
 UPDATE_BATCH_SIZE = 5000
 PROGRESS_EVERY_ROWS = 20_000
@@ -20,7 +19,7 @@ PROGRESS_EVERY_SECONDS = 30.0
 
 
 def enrich_common_score(
-    table_name: str = DEFAULT_TABLE,
+    table_name: str,
     *,
     fetch_batch_size: int = FETCH_BATCH_SIZE,
     update_batch_size: int = UPDATE_BATCH_SIZE,
@@ -245,7 +244,10 @@ def _report_completion(processed: int, updated: int, start_time: float) -> None:
         f"elapsed={elapsed:,.1f}s avg_rate={avg_rate:,.0f} rows/s",
         flush=True,
     )
-
-
-if __name__ == "__main__":
-    enrich_common_score()
+__all__ = [
+    "FETCH_BATCH_SIZE",
+    "UPDATE_BATCH_SIZE",
+    "PROGRESS_EVERY_ROWS",
+    "PROGRESS_EVERY_SECONDS",
+    "enrich_common_score",
+]
