@@ -4,8 +4,9 @@ This is a full tool sets for building a open dictionary, based on wikitionary da
 
 ## Project Structure & Module Organization
 
-- Core logic lives in `src/open_dictionary`. The CLI entry point defined in `pyproject.toml` maps to `open_dictionary:main`; keep new commands wired through this package.
-- Data access helpers sit under `src/open_dictionary/db` (`importer.py`, `access.py`) and should remain focused on PostgreSQL streaming semantics.
+- Core logic lives in `src/open_dictionary`. The CLI entry point defined in `pyproject.toml` resolves to `open_dictionary:main`, which dispatches into `src/open_dictionary/cli.py`; keep any new commands registered there while delegating business logic to feature modules.
+- Data access helpers sit under `src/open_dictionary/db` (for example `access.py`) and should remain focused on PostgreSQL streaming semantics.
+- Wiktionary ingestion utilities are split by concern under `src/open_dictionary/wikitionary/`: `downloader.py`, `extract.py`, `transform.py` (streaming COPY + table helpers), `pipeline.py` (orchestration), `filter.py` (language table materialization), and `progress.py` (shared progress reporters).
 - LLM-facing enrichments live in `src/open_dictionary/llm`, while cross-cutting utilities (environment loading, helpers) belong in `src/open_dictionary/utils`.
 - Runtime artifacts such as dumps or extracted JSONL files are expected in a local `data/` directory (not tracked); scripts should accept paths rather than hard-code locations.
 
@@ -14,6 +15,7 @@ This is a full tool sets for building a open dictionary, based on wikitionary da
 - `uv sync` installs all dependencies declared in `pyproject.toml`.
 - `uv run open-dictionary download --output data/raw-wiktextract-data.jsonl.gz` streams the upstream Wiktextract snapshot.
 - `uv run open-dictionary pipeline --workdir data --table dictionary --column data --truncate` executes download → extract → load → partition in one shot; add `--skip-*` flags for partial runs.
+- `uv run open-dictionary filter en zh --table dictionary_all --column data` copies only selected languages into `dictionary_lang_*` tables; pass `all` as the first positional argument to materialize every language code.
 - `uv run python -m pytest` is the expected test runner once suites are added; for now, rely on targeted CLI runs against a disposable PostgreSQL database.
 
 ## Coding Style & Naming Conventions
