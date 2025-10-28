@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import sys
 from typing import Sequence
 
 import psycopg
@@ -43,10 +44,26 @@ def filter_languages(
 
     language_list: Sequence[str] | None
     if include_all:
+        print(
+            f"[filter] Materializing all languages from {source_table}.{column_name}...",
+            file=sys.stderr,
+            flush=True,
+        )
         language_list = None
     else:
         if not normalized:
             raise ValueError("At least one non-empty language code must be provided.")
+        display_codes = ", ".join(normalized[:5])
+        if len(normalized) > 5:
+            display_codes += ", ..."
+        print(
+            (
+                f"[filter] Materializing {len(normalized)} language(s) "
+                f"({display_codes}) from {source_table}.{column_name}..."
+            ),
+            file=sys.stderr,
+            flush=True,
+        )
         language_list = normalized
 
     return partition_dictionary_by_language(
