@@ -12,6 +12,7 @@ from dotenv import load_dotenv
 
 from .db import cleaner as db_cleaner
 from .db import mark_commonness as db_commonness
+from .llm import define_enricher as llm_define_enricher
 from .wikitionary.downloader import DEFAULT_WIKTIONARY_URL, download_wiktionary_dump
 from .wikitionary.extract import extract_wiktionary_dump
 from .wikitionary.filter import filter_languages
@@ -35,6 +36,7 @@ COMMAND_NAMES = {
     "pipeline",
     "db-clean",
     "db-commonness",
+    "llm-define",
 }
 
 
@@ -244,6 +246,29 @@ def _cmd_db_commonness(args: argparse.Namespace) -> int:
         table_name=args.table,
         fetch_batch_size=args.fetch_batch_size,
         update_batch_size=args.update_batch_size,
+        progress_every_rows=args.progress_every_rows,
+        progress_every_seconds=args.progress_every_seconds,
+        recompute_existing=args.recompute_existing,
+    )
+    return 0
+
+
+def _cmd_llm_define(args: argparse.Namespace) -> int:
+    try:
+        _ = _get_conninfo(args)
+    except RuntimeError as exc:
+        args._parser.error(str(exc))
+
+    llm_define_enricher.enrich_definitions(
+        table_name=args.table,
+        source_column=args.source_column,
+        target_column=args.target_column,
+        fetch_batch_size=args.fetch_batch_size,
+        llm_batch_size=args.llm_batch_size,
+        max_workers=args.max_workers,
+        max_retries=args.max_retries,
+        initial_backoff_seconds=args.initial_backoff_seconds,
+        max_backoff_seconds=args.max_backoff_seconds,
         progress_every_rows=args.progress_every_rows,
         progress_every_seconds=args.progress_every_seconds,
         recompute_existing=args.recompute_existing,
@@ -555,6 +580,80 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     _add_database_options(db_common_parser)
     db_common_parser.set_defaults(func=_cmd_db_commonness, _parser=db_common_parser)
+
+    llm_define_parser = subparsers.add_parser(
+        "llm-define",
+        help="Generate enriched dictionary entries via the LLM define workflow.",
+    )
+    llm_define_parser.add_argument(
+        "--table",
+        default=llm_define_enricher.DEFAULT_TABLE_NAME,
+        help="Source table containing JSONB entries (default: %(default)s).",
+    )
+    llm_define_parser.add_argument(
+        "--source-column",
+        default=llm_define_enricher.DEFAULT_SOURCE_COLUMN,
+        help="Column containing original Wiktionary payloads (default: %(default)s).",
+    )
+    llm_define_parser.add_argument(
+        "--target-column",
+        default=llm_define_enricher.DEFAULT_TARGET_COLUMN,
+        help="Column to store LLM-enriched JSONB (default: %(default)s).",
+    )
+    llm_define_parser.add_argument(
+        "--fetch-batch-size",
+        type=int,
+        default=llm_define_enricher.DEFAULT_FETCH_BATCH_SIZE,
+        help="Rows fetched from PostgreSQL per server-side batch (default: %(default)s).",
+    )
+    llm_define_parser.add_argument(
+        "--llm-batch-size",
+        type=int,
+        default=llm_define_enricher.DEFAULT_LLM_BATCH_SIZE,
+        help="Number of requests dispatched to the LLM at once (default: %(default)s).",
+    )
+    llm_define_parser.add_argument(
+        "--max-workers",
+        type=int,
+        help="Maximum concurrent worker threads for LLM calls (default: llm-batch-size).",
+    )
+    llm_define_parser.add_argument(
+        "--max-retries",
+        type=int,
+        default=llm_define_enricher.DEFAULT_MAX_RETRIES,
+        help="Attempts per row before giving up (default: %(default)s).",
+    )
+    llm_define_parser.add_argument(
+        "--initial-backoff-seconds",
+        type=float,
+        default=llm_define_enricher.DEFAULT_INITIAL_BACKOFF_SECONDS,
+        help="Initial retry backoff in seconds (default: %(default)s).",
+    )
+    llm_define_parser.add_argument(
+        "--max-backoff-seconds",
+        type=float,
+        default=llm_define_enricher.DEFAULT_MAX_BACKOFF_SECONDS,
+        help="Maximum retry backoff in seconds (default: %(default)s).",
+    )
+    llm_define_parser.add_argument(
+        "--progress-every-rows",
+        type=int,
+        default=llm_define_enricher.DEFAULT_PROGRESS_EVERY_ROWS,
+        help="Emit progress after processing this many rows (default: %(default)s).",
+    )
+    llm_define_parser.add_argument(
+        "--progress-every-seconds",
+        type=float,
+        default=llm_define_enricher.DEFAULT_PROGRESS_EVERY_SECONDS,
+        help="Emit progress at least this often in seconds (default: %(default)s).",
+    )
+    llm_define_parser.add_argument(
+        "--recompute-existing",
+        action="store_true",
+        help="Recreate target-column payloads even if already populated.",
+    )
+    _add_database_options(llm_define_parser)
+    llm_define_parser.set_defaults(func=_cmd_llm_define, _parser=llm_define_parser)
 
     return parser
 
