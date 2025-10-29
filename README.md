@@ -1,6 +1,19 @@
 # Open English Dictionary
 
-Utilities for downloading and loading the Wiktionary dataset into PostgreSQL.
+## Rebuilding process WIP
+
+## Currently, this project is being rebuilt.
+
+New features are:
+
+- Streamlined process + pipeline integration
+- Wiktionary grounding + LLM explain
+  - Enormous words data across multiple languages
+  - Extremely detailed definitions
+- New distribution format will be: jsonl, sqlite and more are to be determined
+- Options are available to select specific category of words
+
+**Behold and stay tuned!**
 
 ## Prerequisites
 
