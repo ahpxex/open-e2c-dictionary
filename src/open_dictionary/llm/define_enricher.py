@@ -5,7 +5,7 @@ import json
 import random
 import time
 from dataclasses import dataclass
-from typing import Any, Sequence
+from typing import Any, Callable, Sequence
 
 from psycopg import sql
 from psycopg.cursor import Cursor
@@ -99,6 +99,15 @@ def enrich_definitions(
             last_log_time = now
             last_log_count = processed
 
+    def record_result(is_success: bool) -> None:
+        nonlocal processed, succeeded, failed
+        processed += 1
+        if is_success:
+            succeeded += 1
+        else:
+            failed += 1
+        emit_progress(force=True)
+
     with data_access.get_connection() as update_conn:
         with update_conn.cursor() as cursor:
             row_stream = data_access.iterate_table(
@@ -119,7 +128,7 @@ def enrich_definitions(
                     failed += 1
                     processed += 1
                     print("[llm-define] skipped row without id", flush=True)
-                    emit_progress()
+                    emit_progress(force=True)
                     continue
 
                 payload = _load_payload(row.get(source_column))
@@ -130,13 +139,13 @@ def enrich_definitions(
                         f"[llm-define] row_id={row_id} missing or invalid {source_column}",
                         flush=True,
                     )
-                    emit_progress()
+                    emit_progress(force=True)
                     continue
 
                 pending_rows.append(RowPayload(int(row_id), payload))
 
                 if len(pending_rows) >= llm_batch_size:
-                    batch_result = _process_batch(
+                    _process_batch(
                         cursor,
                         table_name,
                         target_column,
@@ -145,16 +154,13 @@ def enrich_definitions(
                         max_retries,
                         initial_backoff_seconds,
                         max_backoff_seconds,
+                        record_result,
                     )
-                    succeeded += batch_result.succeeded
-                    failed += batch_result.failed
-                    processed += batch_result.processed
                     pending_rows.clear()
                     update_conn.commit()
-                    emit_progress(force=last_log_count == 0)
 
             if pending_rows:
-                batch_result = _process_batch(
+                _process_batch(
                     cursor,
                     table_name,
                     target_column,
@@ -163,23 +169,12 @@ def enrich_definitions(
                     max_retries,
                     initial_backoff_seconds,
                     max_backoff_seconds,
+                    record_result,
                 )
-                succeeded += batch_result.succeeded
-                failed += batch_result.failed
-                processed += batch_result.processed
                 pending_rows.clear()
                 update_conn.commit()
-                emit_progress(force=last_log_count == 0)
 
-    emit_progress(force=True)
     _report_completion(processed, succeeded, failed, start_time)
-
-
-@dataclass(frozen=True)
-class BatchResult:
-    processed: int
-    succeeded: int
-    failed: int
 
 
 def _process_batch(
@@ -191,22 +186,18 @@ def _process_batch(
     max_retries: int,
     initial_backoff_seconds: float,
     max_backoff_seconds: float,
-) -> BatchResult:
-    successes, failures = _run_llm_batch(
+    record_result: Callable[[bool], None],
+) -> None:
+    successes = _run_llm_batch(
         rows,
         max_workers,
         max_retries,
         initial_backoff_seconds,
         max_backoff_seconds,
+        record_result,
     )
 
     _apply_updates(cursor, table_name, target_column, successes)
-
-    return BatchResult(
-        processed=len(rows),
-        succeeded=len(successes),
-        failed=len(failures),
-    )
 
 
 def _run_llm_batch(
@@ -215,9 +206,9 @@ def _run_llm_batch(
     max_retries: int,
     initial_backoff_seconds: float,
     max_backoff_seconds: float,
-) -> tuple[list[tuple[int, str]], list[int]]:
+    record_result: Callable[[bool], None],
+) -> list[tuple[int, str]]:
     successes: list[tuple[int, str]] = []
-    failures: list[int] = []
 
     worker_count = min(max(len(rows), 1), max_workers)
 
@@ -238,19 +229,20 @@ def _run_llm_batch(
             try:
                 definition = future.result()
             except Exception as exc:  # pragma: no cover - network/runtime failures
-                failures.append(row.row_id)
                 print(
                     f"[llm-define] row_id={row.row_id} failed: {exc}",
                     flush=True,
                 )
+                record_result(False)
             else:
                 payload_json = json.dumps(
                     definition.model_dump(mode="json"),
                     ensure_ascii=False,
                 )
                 successes.append((row.row_id, payload_json))
+                record_result(True)
 
-    return successes, failures
+    return successes
 
 
 def _define_with_retry(
