@@ -86,6 +86,15 @@ Populate the `common_score` column with word frequency data (re-run with `--reco
 uv run open-dictionary db-commonness --table dictionary_filtered_en
 ```
 
+Normalize raw Wiktionary payloads into a slimmer JSONB column without invoking LLMs (writes to `process` by default):
+
+```bash
+uv run open-dictionary pre-process \
+  --table dictionary_filtered_en \
+  --source-column data \
+  --target-column processed
+```
+
 Remove low-quality rows (zero common score, numeric tokens, legacy tags) directly in PostgreSQL:
 
 ```bash

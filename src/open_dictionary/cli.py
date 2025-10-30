@@ -16,6 +16,7 @@ from .llm import define_enricher as llm_define_enricher
 from .wikitionary.downloader import DEFAULT_WIKTIONARY_URL, download_wiktionary_dump
 from .wikitionary.extract import extract_wiktionary_dump
 from .wikitionary.filter import filter_languages
+from .wikitionary import pre_process as wiktionary_pre_process
 from .wikitionary.pipeline import run_pipeline
 from .wikitionary.transform import (
     JsonlProcessingError,
@@ -37,6 +38,7 @@ COMMAND_NAMES = {
     "db-clean",
     "db-commonness",
     "llm-define",
+    "pre-process",
 }
 
 
@@ -276,6 +278,25 @@ def _cmd_llm_define(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_pre_process(args: argparse.Namespace) -> int:
+    try:
+        _ = _get_conninfo(args)
+    except RuntimeError as exc:
+        args._parser.error(str(exc))
+
+    wiktionary_pre_process.preprocess_entries(
+        table_name=args.table,
+        source_column=args.source_column,
+        target_column=args.target_column,
+        fetch_batch_size=args.fetch_batch_size,
+        update_batch_size=args.update_batch_size,
+        progress_every_rows=args.progress_every_rows,
+        progress_every_seconds=args.progress_every_seconds,
+        recompute_existing=args.recompute_existing,
+    )
+    return 0
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Utilities for downloading, extracting, and loading Wiktionary dumps.",
@@ -503,6 +524,57 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     _add_database_options(filter_parser)
     filter_parser.set_defaults(func=_cmd_filter, _parser=filter_parser)
+
+    pre_process_parser = subparsers.add_parser(
+        "pre-process",
+        help="Trim Wiktionary entries to the subset needed by downstream workflows.",
+    )
+    pre_process_parser.add_argument(
+        "--table",
+        default="dictionary_all",
+        help="Source table containing raw Wiktionary entries (default: %(default)s).",
+    )
+    pre_process_parser.add_argument(
+        "--source-column",
+        default="data",
+        help="Column storing the original Wiktionary JSON (default: %(default)s).",
+    )
+    pre_process_parser.add_argument(
+        "--target-column",
+        default="process",
+        help="Column to store the normalized JSON (default: %(default)s).",
+    )
+    pre_process_parser.add_argument(
+        "--fetch-batch-size",
+        type=int,
+        default=wiktionary_pre_process.FETCH_BATCH_SIZE,
+        help="Rows fetched per streaming batch (default: %(default)s).",
+    )
+    pre_process_parser.add_argument(
+        "--update-batch-size",
+        type=int,
+        default=wiktionary_pre_process.UPDATE_BATCH_SIZE,
+        help="Rows updated per write batch (default: %(default)s).",
+    )
+    pre_process_parser.add_argument(
+        "--progress-every-rows",
+        type=int,
+        default=wiktionary_pre_process.PROGRESS_EVERY_ROWS,
+        help="Emit progress after this many processed rows (default: %(default)s).",
+    )
+    pre_process_parser.add_argument(
+        "--progress-every-seconds",
+        type=float,
+        default=wiktionary_pre_process.PROGRESS_EVERY_SECONDS,
+        help="Emit progress at least this often in seconds (default: %(default)s).",
+    )
+    pre_process_parser.add_argument(
+        "--recompute-existing",
+        action="store_true",
+        help="Regenerate payloads even if the target column is already populated.",
+    )
+    _add_database_options(pre_process_parser)
+    pre_process_parser.set_defaults(func=_cmd_pre_process, _parser=pre_process_parser)
 
     db_clean_parser = subparsers.add_parser(
         "db-clean",
